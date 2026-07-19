@@ -1,4 +1,4 @@
-# Commotransfer — User Manual
+# Commotransfer — User Manual/README
 ---
 
 ## Table of Contents
