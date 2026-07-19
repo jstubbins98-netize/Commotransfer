@@ -1,7 +1,4 @@
 # Commotransfer — User Manual
-
-**Version 1.0.0**
-
 ---
 
 ## Table of Contents
