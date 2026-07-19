@@ -7,65 +7,90 @@
 ## Table of Contents
 
 1. Overview
-2. How It Works
-3. System Requirements
-4. Installation
-   - 4.1 Install Homebrew
-   - 4.2 Install Qt and CMake
-   - 4.3 Build Commotransfer
-   - 4.4 First-Run Setup Wizard
-5. Hardware Setup
-   - 5.1 What You Need
-   - 5.2 Connecting the ZoomFloppy
-   - 5.3 Drive Device Numbers
-6. The Main Window
-   - 6.1 File Drop Zone
-   - 6.2 Transfer Settings
-   - 6.3 Action Buttons
-   - 6.4 Activity Log
-   - 6.5 Status Bar
-   - 6.6 Menu Bar
-7. Writing a File to Disk
-8. Verifying a Transfer
-9. Drive Utilities
-   - 9.1 Detect Drives
-   - 9.2 Reset IEC Bus
-10. CBM Filenames Explained]
-11. Under the Hood
-    - 11.1 OpenCBM
-    - 11.2 Writing
-    - 11.3 Verification
-    - 11.4 The ZoomFloppy
-    - 11.5 Application Architecture
-12. Troubleshooting
-13. Glossary
+2. Supported File Formats
+3. How It Works
+4. System Requirements
+5. Installation
+   - 5.1 Install Homebrew
+   - 5.2 Install Qt and CMake
+   - 5.3 Build Commotransfer
+   - 5.4 First-Run Setup Wizard
+   - 5.5 Installing nibtools (for G64/NIB support)
+6. Hardware Setup
+   - 6.1 What You Need
+   - 6.2 Connecting the ZoomFloppy
+   - 6.3 Drive Device Numbers
+7. The Main Window
+   - 7.1 File Drop Zone
+   - 7.2 Transfer Settings
+   - 7.3 Action Buttons
+   - 7.4 Activity Log
+   - 7.5 Status Bar
+   - 7.6 Menu Bar
+8. Writing a PRG File to Disk
+9. Writing a Disk Image to Disk
+10. Verifying a Transfer
+11. Formatting a Disk
+12. Drive Utilities
+    - 12.1 Detect Drives
+    - 12.2 Reset IEC Bus
+13. CBM Filenames Explained
+14. Under the Hood
+    - 14.1 OpenCBM
+    - 14.2 nibtools
+    - 14.3 Writing PRG Files
+    - 14.4 Writing Disk Images
+    - 14.5 Verification
+    - 14.6 The ZoomFloppy
+    - 14.7 Application Architecture
+15. Troubleshooting
+16. Glossary
 
 ---
 
 ## 1. Overview
 
-**Commotransfer** is a native macOS application that lets you write Commodore 64 `.prg` program files from your Mac directly to real 5¼" floppy disks using a **ZoomFloppy** USB adapter. After writing, it can optionally read the file back from the disk and verify the transfer was byte-perfect using a SHA-256 checksum comparison.
+**Commotransfer** is a native macOS application that lets you write Commodore disk files from your Mac directly to real 5¼" floppy disks using a **ZoomFloppy** USB adapter. It supports individual program files (`.prg`), full disk images (`.d64`), and raw GCR nibble images (`.g64` / `.nib`).
 
-Commotransfer is a graphical front-end for the open-source **OpenCBM** toolkit. It handles all the command-line details for you — you just drag a file, pick a drive number, and click Write.
+Commotransfer is a graphical front-end for the open-source **OpenCBM** toolkit and **nibtools**. It handles all the command-line details for you — you drag a file, pick a drive number, and click Write.
 
 **What Commotransfer can do:**
 
-- Write any `.prg` file to a Commodore floppy disk (1541, 1571, and compatible drives)
-- Optionally verify the written file by reading it back and comparing checksums
+- Write `.prg` program files to a Commodore floppy disk (1541, 1571, and compatible drives)
+- Write `.d64` 1541 disk images sector-by-sector to a real floppy disk
+- Write `.g64` GCR disk images and `.nib` raw nibble images (requires nibtools)
+- Verify `.prg` writes by reading the file back and comparing SHA-256 checksums
+- Format disks with a custom name and ID using `cbmformat`
 - Detect drives connected via the ZoomFloppy adapter
 - Reset the IEC serial bus if a drive becomes unresponsive
 - Install and configure OpenCBM automatically on first launch
 
 **What Commotransfer does not do:**
 
-- Format disks (use `cbmformat` in Terminal for that)
-- Read full disk images (use `d64copy` for `.d64` image transfers)
-- Work with Commodore 128, Plus/4, or VIC-20 specific formats (though basic PRG transfer may still work)
-- Operate without a ZoomFloppy or compatible OpenCBM-supported USB adapter
+- Read disk images from a real floppy back to the Mac (use `d64copy` or `nibread` in Terminal)
+- Verify disk-image writes (byte-level readback via IEC is not supported for full images)
+- Work without a ZoomFloppy or compatible OpenCBM-supported USB adapter
 
 ---
 
-## 2. How It Works
+## 2. Supported File Formats
+
+| Extension | Format | Tool used | Notes |
+|---|---|---|---|
+| `.prg` | Commodore program file | `cbmcopy` | Single file; CBM filename editable; verify supported |
+| `.d64` | 1541 disk image (35 tracks × 17–21 sectors) | `d64copy` | Writes entire disk; no CBM filename field |
+| `.g64` | GCR disk image | `nibwrite` | Requires nibtools (`brew install nibtools`) |
+| `.nib` | Raw nibble image | `nibwrite` | Requires nibtools (`brew install nibtools`) |
+
+**Choosing the right format:**
+
+- Use **`.prg`** when you have a single program you want to put onto a disk that already has other files — it only writes that one file, leaving everything else intact.
+- Use **`.d64`** when you want to restore a complete disk image downloaded from the internet (e.g. from csdb.dk or Commodore.ca). This overwrites the entire disk.
+- Use **`.g64` / `.nib`** for copy-protected originals whose protection scheme encodes data in non-standard GCR track patterns that `.d64` cannot represent faithfully.
+
+---
+
+## 3. How It Works
 
 ```
 ┌──────────────┐   USB (HID)   ┌─────────────┐   IEC Serial   ┌──────────────┐
@@ -73,22 +98,25 @@ Commotransfer is a graphical front-end for the open-source **OpenCBM** toolkit. 
 │ Commotransfer│               │  Adapter    │                 │    Drive     │
 └──────────────┘               └─────────────┘                 └──────────────┘
        │                             │
-       │  cbmcopy / cbmctrl          │  Commodore IEC bus
-       │  (via OpenCBM)              │  (clock, data, ATN lines)
+       │  cbmcopy / d64copy /        │  Commodore IEC bus
+       │  nibwrite / cbmctrl         │  (clock, data, ATN lines)
        ▼                             ▼
-  Local .prg file              5¼" floppy disk
+  Local disk file              5¼" floppy disk
 ```
 
-1. You select a `.prg` file in Commotransfer.
-2. Commotransfer calls `cbmcopy` (part of OpenCBM) with the file path and target drive number.
-3. `cbmcopy` communicates with the ZoomFloppy over USB using OpenCBM's USB driver.
-4. The ZoomFloppy translates USB signals into the Commodore **IEC serial bus** protocol.
-5. The drive writes the file to the floppy disk in Commodore PRG format.
-6. Optionally, `cbmcopy` reads the file back and Commotransfer compares checksums.
+The tool Commotransfer calls depends on the file format:
+
+| File type | Command invoked |
+|---|---|
+| `.prg` | `cbmcopy -w -d <drive> <file>` |
+| `.d64` | `d64copy -d <drive> <file> :` |
+| `.g64` / `.nib` | `nibwrite -d <drive> <file>` |
+
+All commands communicate with the ZoomFloppy over USB using OpenCBM's driver, which then talks to the drive via the IEC serial bus.
 
 ---
 
-## 3. System Requirements
+## 4. System Requirements
 
 | Component | Minimum |
 |---|---|
@@ -96,6 +124,8 @@ Commotransfer is a graphical front-end for the open-source **OpenCBM** toolkit. 
 | **Homebrew** | Any recent version — [brew.sh](https://brew.sh) |
 | **Qt** | Qt 6 (Qt 5.15 also supported as fallback) |
 | **CMake** | 3.16 or later |
+| **OpenCBM** | Installed via Homebrew — provides `cbmcopy`, `cbmctrl`, `d64copy`, `cbmformat` |
+| **nibtools** | Optional — provides `nibwrite` for `.g64` / `.nib` support (`brew install nibtools`) |
 | **ZoomFloppy** | USB adapter from [go4retro.com](http://www.go4retro.com/products/zoomfloppy/) |
 | **Drive** | Commodore 1541, 1571, or compatible 5¼" IEC drive |
 | **Disk** | Formatted Commodore 1541 double-sided single-density (DSSD) diskette |
@@ -104,9 +134,9 @@ Commotransfer is a graphical front-end for the open-source **OpenCBM** toolkit. 
 
 ---
 
-## 4. Installation
+## 5. Installation
 
-### 4.1 Install Homebrew
+### 5.1 Install Homebrew
 
 If Homebrew is not already installed, open **Terminal** and run:
 
@@ -118,7 +148,7 @@ Follow the on-screen instructions. On Apple Silicon, Homebrew installs to `/opt/
 
 After installation, follow any instructions to add Homebrew to your PATH (Homebrew will print these if needed).
 
-### 4.2 Install Qt and CMake
+### 5.2 Install Qt and CMake
 
 ```bash
 brew install qt cmake
@@ -126,7 +156,7 @@ brew install qt cmake
 
 This installs Qt 6 and CMake. The build script detects these automatically.
 
-### 4.3 Build Commotransfer
+### 5.3 Build Commotransfer
 
 Navigate to the `Commotransfer` project directory and run the build script:
 
@@ -150,7 +180,7 @@ bash build.sh --run     # Build and immediately launch the app
 
 Once built, you can copy `build/Commotransfer.app` to your `/Applications` folder like any other macOS app.
 
-### 4.4 First-Run Setup Wizard
+### 5.4 First-Run Setup Wizard
 
 The first time Commotransfer launches, the **Setup Wizard** opens automatically. It has four steps:
 
@@ -179,16 +209,28 @@ The wizard confirms everything is ready. Click **Open Commotransfer** to launch 
 
 ---
 
-## 5. Hardware Setup
+### 5.5 Installing nibtools (for G64/NIB support)
 
-### 5.1 What You Need
+nibtools is a separate package that provides `nibwrite`, needed to write `.g64` and `.nib` disk images. Install it after OpenCBM:
+
+```bash
+brew install nibtools
+```
+
+If nibtools is not installed and you attempt to write a `.g64` or `.nib` file, Commotransfer will log an error and fail gracefully — no other functionality is affected.
+
+---
+
+## 6. Hardware Setup
+
+### 6.1 What You Need
 
 - A **ZoomFloppy** USB adapter
 - A Commodore **IEC serial cable** (the round 6-pin DIN connector used by C64 peripherals)
 - A **Commodore 1541** or 1571 floppy drive (or compatible), with its own power supply
 - A formatted **5¼" double-sided single-density (DSSD)** diskette
 
-### 5.2 Connecting the ZoomFloppy
+### 6.2 Connecting the ZoomFloppy
 
 1. Connect the IEC serial cable from the **ZoomFloppy's IEC port** to the **drive's IEC port**.
 2. Plug the ZoomFloppy into any available **USB port** on your Mac.
@@ -199,7 +241,7 @@ The drive's activity light may briefly flash when the IEC bus is initialised —
 
 > **Multiple drives:** You can chain multiple drives on the IEC bus. Each drive needs a unique device number (see below). Only one ZoomFloppy is needed for the whole chain.
 
-### 5.3 Drive Device Numbers
+### 6.3 Drive Device Numbers
 
 Commodore IEC drives are addressed by a device number set by jumpers or a switch on the drive:
 
@@ -315,36 +357,104 @@ The thin bar at the bottom of the window shows the result of the most recent ope
 
 ---
 
-## 7. Writing a File to Disk
+## 8. Writing a PRG File to Disk
 
 **Before you begin:**
 - Drive is powered on, IEC cable connected to ZoomFloppy
 - ZoomFloppy is plugged into your Mac
-- A formatted disk is inserted in the drive
-- The drive's activity light is off (not busy)
+- A formatted disk is inserted in the drive (see [Formatting a Disk](#11-formatting-a-disk) if you need to prepare one)
+- The drive's activity light is off
 
 **Steps:**
 
-1. Load a `.prg` file — drag it onto the drop zone or use **File → Open .prg File…**
-2. Confirm the **Drive number** matches your drive (usually `8`)
-3. Optionally set a custom **CBM filename**, or leave blank for automatic naming
-4. Ensure **Verify after write** is checked (recommended)
+1. Drag a `.prg` file onto the drop zone or use **File → Open Disk File…**
+2. Confirm the **Drive number** (usually `8`)
+3. Optionally type a custom **CBM filename**, or leave blank for auto-naming
+4. Ensure **Verify after write** is checked (strongly recommended)
 5. Click **Write to Disk**
 
-Commotransfer will:
-1. Log the operation details (filename, CBM name, drive)
-2. Launch `cbmcopy` in the background
-3. Stream all output from `cbmcopy` to the log in real time
-4. If verify is enabled: read the file back and compare checksums
-5. Report success or failure in the log and status bar
+Commotransfer runs `cbmcopy -w -d <drive> <file>` in the background and streams all output to the log. When done, it optionally reads the file back and compares checksums.
 
-**Typical write time:** A 200-block PRG file (~50 KB) takes approximately 30–90 seconds depending on the drive speed and USB timing. The 1541 is slow by design — this is normal.
+**Typical time:** ~30–90 seconds for a typical game (depends on file size and 1541 speed).
 
-> **Do not remove the disk or power off the drive during a transfer.** This may corrupt the disk directory or leave a partial file on disk. Use Cancel if you need to abort.
+> **Do not remove the disk or power off the drive during a transfer.** Use Cancel to abort cleanly.
 
 ---
 
-## 8. Formatting a Disk
+## 9. Writing a Disk Image to Disk
+
+Disk image files (`.d64`, `.g64`, `.nib`) represent an entire floppy disk, not just a single file. Writing one **replaces all content on the physical disk**.
+
+> ⚠ **This overwrites everything on the target disk.** Use a blank or expendable disk.
+
+**Before you begin:**
+- Drive is powered on and connected via ZoomFloppy
+- A blank or expendable disk is inserted — all existing content will be destroyed
+- The drive's activity light is off
+
+**Steps:**
+
+1. Drag a `.d64`, `.g64`, or `.nib` file onto the drop zone, or use **File → Open Disk File…**
+2. The drop zone confirms the file type (e.g. "D64 1541 disk image")
+3. The **CBM filename** and **Verify after write** rows disappear — they are not applicable for disk images
+4. Confirm the **Drive number**
+5. Click **Write to Disk**
+
+**What happens for each format:**
+
+| Format | Command | Notes |
+|---|---|---|
+| `.d64` | `d64copy -d <drive> <file> :` | Writes all 35 tracks × up to 21 sectors. Typical time: 4–8 minutes |
+| `.g64` | `nibwrite -d <drive> <file>` | Writes raw GCR data track-by-track. Requires nibtools |
+| `.nib` | `nibwrite -d <drive> <file>` | Same as G64 path — raw nibble data. Requires nibtools |
+
+**G64 / NIB and nibtools**
+If nibtools is not installed, Commotransfer logs:
+```
+ERROR: nibwrite not found. Install nibtools: brew install nibtools
+```
+Install it with `brew install nibtools` and try again.
+
+**Verify not available for disk images**
+Unlike `.prg` writes, full-disk verify (reading back via IEC and comparing hashes) is not supported. Rely on `d64copy` or `nibtools` own error reporting to confirm the write succeeded.
+
+> **Do not remove the disk or power off the drive during a disk image write.** A partial write may leave the disk in an unreadable state.
+
+---
+
+## 10. Verifying a Transfer
+
+Verification is available for **`.prg` files only**.
+
+Verification works by:
+
+1. Computing the **SHA-256** cryptographic hash of the original local `.prg` file
+2. Running `cbmcopy -r` to read the file back from the Commodore disk into a temporary directory
+3. Computing the SHA-256 hash of the read-back file
+4. Comparing the two hashes
+
+Both hashes are printed in the log:
+
+```
+[10:44:05] Source SHA-256 : a3f82c1d...
+[10:44:09] Disk SHA-256   : a3f82c1d...
+[10:44:09] ✓ Verification passed — disk contents match source file.
+```
+
+If the hashes differ:
+
+```
+[10:44:09] ✗ Verification FAILED — checksums do not match!
+```
+
+Retry the write on a different disk — the original media may be faulty.
+
+**Verify Only button**
+Lets you verify a disk without first writing. Useful to confirm an already-written disk is intact.
+
+---
+
+## 11. Formatting a Disk
 
 > ⚠ **Formatting permanently erases all data on the disk.** There is no undo.
 
@@ -375,46 +485,9 @@ The disk is ready to use. Its directory is empty and its full capacity is availa
 
 ---
 
-## 9. Verifying a Transfer
+## 12. Drive Utilities
 
-Verification works by:
-
-1. Computing the **SHA-256** cryptographic hash of the original local `.prg` file
-2. Running `cbmcopy -r` to read the file back from the Commodore disk into a temporary directory
-3. Computing the SHA-256 hash of the read-back file
-4. Comparing the two hashes
-
-Both hashes are printed in the log so you can inspect them manually if needed:
-
-```
-[10:44:05] Source SHA-256 : a3f82c1d...
-[10:44:09] Disk SHA-256   : a3f82c1d...
-[10:44:09] ✓ Verification passed — disk contents match source file.
-```
-
-If the hashes differ:
-
-```
-[10:44:09] ✗ Verification FAILED — checksums do not match!
-```
-
-A failed verification means the data on disk does not exactly match your source file. Possible causes:
-
-- The disk has a bad sector at the location where the file was written
-- The disk is worn, dirty, or misaligned
-- An IEC bus error occurred during the write
-- The disk was not formatted correctly for the drive
-
-**What to do on a failed verify:**
-1. Try a different disk
-2. Try the write again on the same disk (in case of a transient bus error)
-3. If failures persist, clean the drive head and/or check the IEC cable connections
-
----
-
-## 9. Drive Utilities
-
-### 9.1 Detect Drives
+### 12.1 Detect Drives
 
 **Drive → Detect Drives** runs `cbmctrl detect`, which queries every possible device number (8–15) on the IEC bus and logs any drives that respond.
 
@@ -428,7 +501,7 @@ This is useful for:
 - Checking the device number a drive is configured to use
 - Diagnosing "drive not found" errors
 
-### 9.2 Reset IEC Bus
+### 12.2 Reset IEC Bus
 
 **Drive → Reset IEC Bus** sends an ATN (Attention) reset signal across the IEC bus via `cbmctrl reset`. This:
 
@@ -445,7 +518,7 @@ A reset does **not** damage the disk or erase any data.
 
 ---
 
-## 10. CBM Filenames Explained
+## 13. CBM Filenames Explained
 
 Commodore disk filenames have different rules from macOS filenames:
 
@@ -483,63 +556,74 @@ Examples:
 
 ---
 
-## 11. Under the Hood
+## 14. Under the Hood
 
-### 11.1 OpenCBM
+### 14.1 OpenCBM
 
 [OpenCBM](https://opencbm.trikaliotis.net/) is an open-source library and set of command-line tools for communicating with Commodore IEC bus peripherals from modern computers. It supports a range of USB-to-IEC adapters including the ZoomFloppy.
 
-Commotransfer uses two OpenCBM tools:
+Commotransfer uses four OpenCBM tools:
 
 | Tool | Purpose |
 |---|---|
-| `cbmcopy` | Read and write files between the local filesystem and a CBM drive |
+| `cbmcopy` | Transfer individual files between the local filesystem and a CBM drive |
 | `cbmctrl` | Low-level IEC bus control (detect, reset, etc.) |
+| `d64copy` | Write or read full `.d64` disk images to/from a real drive |
+| `cbmformat` | Low-level format a disk |
 
-Both tools are installed by Homebrew to `/opt/homebrew/bin/` (Apple Silicon) or `/usr/local/bin/` (Intel).
+All tools are installed by Homebrew to `/opt/homebrew/bin/` (Apple Silicon) or `/usr/local/bin/` (Intel).
 
-### 11.2 Writing
+### 14.2 nibtools
 
-A write operation issues this command:
+[nibtools](https://c64preservation.com/dp.php?pg=nibtools) is a separate open-source package that handles raw GCR disk images. Commotransfer uses its `nibwrite` tool to write `.g64` and `.nib` files.
+
+Install via: `brew install nibtools`
+
+nibtools writes GCR data track-by-track in a format that preserves non-standard sector layouts used by copy-protection schemes — something `d64copy` cannot do.
+
+### 14.3 Writing PRG Files
 
 ```bash
 cbmcopy -w -d <drive> <filename>
-```
-
-For example, writing `game.prg` to drive 8:
-
-```bash
-cbmcopy -w -d 8 game.prg
-```
-
-`cbmcopy` runs from the file's containing directory. The file is written to the disk with a PRG file type marker. The on-disk name is derived from the local filename unless you supply a custom CBM name, in which case the argument becomes:
-
-```bash
+# With custom CBM name:
 cbmcopy -w -d 8 "game.prg,GAME,p"
 ```
 
-The `,p` suffix tells cbmcopy to use PRG type explicitly.
+`cbmcopy` runs from the file's containing directory. The `,p` suffix sets the file type to PRG explicitly.
 
-### 11.3 Verification
+### 14.4 Writing Disk Images
 
-Verification is a two-phase operation:
+```bash
+# D64:
+d64copy -d <drive> <image.d64> :
+# The trailing ":" means "the IEC bus drive".
+
+# G64 / NIB:
+nibwrite -d <drive> <imagefile>
+```
+
+`d64copy` walks all 35 tracks of the image and writes each sector. `nibwrite` writes raw GCR data track-by-track. Both are significantly slower than writing a single PRG file.
+
+### 14.5 Verification
+
+Verification applies to `.prg` files only. It is a two-phase operation:
 
 **Phase 1 — Read back**
 ```bash
 cbmcopy -r -d <drive> <CBM_NAME>
 ```
-This reads the named file from the disk into a temporary directory created by the OS. The temporary directory is deleted automatically when verification completes.
+The named file is read from the disk into a temporary directory. The directory is deleted after comparison.
 
 **Phase 2 — Checksum comparison**
-Commotransfer computes the SHA-256 hash of both the original file and the read-back file using Qt's `QCryptographicHash` class. If they match, the transfer is confirmed good.
+Commotransfer computes the SHA-256 hash of both the original file and the read-back copy using Qt's `QCryptographicHash`. Matching digests confirm a good transfer.
 
-### 11.4 The ZoomFloppy
+### 14.6 The ZoomFloppy
 
 The ZoomFloppy is a USB HID (Human Interface Device) adapter designed by [go4retro](http://www.go4retro.com/products/zoomfloppy/). It presents itself to macOS as a standard USB device — no custom kernel driver needed. OpenCBM's user-space library communicates with it via the IOKit HID framework.
 
 The ZoomFloppy translates between USB packets and the three-wire Commodore IEC serial bus: **Clock**, **Data**, and **ATN** (Attention). It handles the timing-critical serial protocol that the C64 uses to talk to its drives.
 
-### 11.5 Application Architecture
+### 14.7 Application Architecture
 
 Commotransfer is built in **C++17** with **Qt 6** (Widgets). It follows a straightforward model:
 
@@ -547,24 +631,24 @@ Commotransfer is built in **C++17** with **Qt 6** (Widgets). It follows a straig
 main.cpp
   └─ SetupWizard        First-run wizard (QWizard)
   └─ MainWindow         Main application window (QMainWindow)
-        ├─ DropZone     Custom drag-and-drop widget (QLabel subclass)
+        ├─ DropZone     Drag-and-drop widget — accepts .prg/.d64/.g64/.nib
         ├─ TransferWorker  Background thread (QThread + QObject)
-        │     └─ OpenCBMWrapper  Calls cbmcopy / cbmctrl via QProcess
+        │     └─ OpenCBMWrapper  Calls cbmcopy/d64copy/nibwrite/cbmctrl
         └─ Activity log   (QTextEdit, read-only)
 ```
 
-**TransferWorker** runs in its own `QThread` so the UI remains responsive during long transfers. It communicates back to the main thread exclusively through Qt signals:
+**TransferWorker** runs in its own `QThread`. It branches on the file extension to choose the right tool. It communicates back to the main thread exclusively through Qt signals:
 - `logLine(QString)` — a new output line to append to the log
 - `progress(int)` — progress percentage (-1 for indeterminate)
 - `finished(bool, QString)` — operation complete, with success flag and summary
 
-**OpenCBMWrapper** is a pure static utility class. It locates the OpenCBM binaries by searching known Homebrew paths, constructs the correct arguments, and runs `cbmcopy` or `cbmctrl` via `QProcess`. The caller supplies the `QProcess` instance so it can be cancelled from outside.
+**OpenCBMWrapper** is a pure static utility class. It classifies files via `fileTypeOf()`, locates binaries by searching known Homebrew paths, and runs the appropriate tool via `QProcess`. The caller supplies the `QProcess` instance so it can be cancelled from outside.
 
-**DropZone** is a custom `QLabel` subclass that paints its own dashed-border drop target using `QPainter` and accepts `QDropEvent` for `.prg` files. Clicking it opens a `QFileDialog`.
+**DropZone** is a custom `QLabel` subclass that paints its own dashed-border drop target using `QPainter` and accepts `.prg`, `.d64`, `.g64`, and `.nib` files. When a file is loaded it displays the format type description alongside the filename. Clicking it opens a `QFileDialog` filtered to all supported formats.
 
 ---
 
-## 12. Troubleshooting
+## 15. Troubleshooting
 
 **"OpenCBM not installed — run Setup"**
 
@@ -578,7 +662,7 @@ Then restart Commotransfer.
 
 **Write button is greyed out**
 
-Either no file is loaded (drop a `.prg` file first) or another operation is already running. Wait for the current operation to finish or click Cancel.
+Either no file is loaded (drop a supported file first) or another operation is already running. Wait for the current operation to finish or click Cancel.
 
 ---
 
@@ -593,9 +677,24 @@ Check the following in order:
 
 ---
 
-**Transfer fails with "ERROR: cbmcopy not found"**
+**Transfer fails with "ERROR: cbmcopy not found" or "ERROR: d64copy not found"**
 
-OpenCBM's tools are not on the search path. Commotransfer looks in `/opt/homebrew/bin` and `/usr/local/bin`. If you installed OpenCBM another way, ensure `cbmcopy` is in one of those locations or open a bug report.
+OpenCBM's tools are not on the search path. Commotransfer looks in `/opt/homebrew/bin` and `/usr/local/bin`. Run `brew install opencbm` to (re)install, or ensure the binaries are in one of those locations.
+
+---
+
+**Transfer fails with "ERROR: nibwrite not found"**
+
+nibtools is not installed. This is required for `.g64` and `.nib` files. Install it:
+```bash
+brew install nibtools
+```
+
+---
+
+**D64 write takes several minutes**
+
+This is expected. `d64copy` writes all 35 tracks × up to 21 sectors of the image. On a real 1541 this takes 4–8 minutes. The drive's activity light will be continuously on — do not interrupt.
 
 ---
 
@@ -641,7 +740,7 @@ A standard 1541-formatted disk holds 664 blocks free (approximately 170 KB). Eac
 
 ---
 
-## 13. Glossary
+## 16. Glossary
 
 **ATN (Attention)**
 One of the three signal lines on the Commodore IEC bus. The computer asserts ATN to get the attention of all devices before issuing a command.
@@ -658,8 +757,20 @@ Commodore Business Machines — the company that made the Commodore 64, the 1541
 **Device number**
 The address a Commodore peripheral uses on the IEC bus. Drives typically use numbers 8–11; the printer was device 4.
 
+**d64copy**
+An OpenCBM command-line tool for transferring full `.d64` disk images between a modern computer and a real 1541/1571 drive.
+
 **D64**
-A disk image format representing an entire 1541 floppy as a single file. Commotransfer does not work with D64 images — it transfers individual `.prg` files.
+A disk image format that encodes an entire 1541 floppy disk (35 tracks, up to 683 sectors) as a single flat file. Written to real disks using `d64copy`.
+
+**G64**
+A disk image format that stores raw GCR-encoded track data, allowing faithful representation of copy-protected disks whose protection encodes data in non-standard sector layouts.
+
+**NIB**
+A raw nibble disk image format similar in purpose to G64. Stores the raw magnetic flux transitions for each track. Written using nibtools' `nibwrite` tool.
+
+**nibtools**
+An open-source toolset for reading and writing raw GCR/nibble disk images. Provides `nibwrite` (write to disk) and `nibread` (read from disk).
 
 **IEC bus**
 The serial bus used by Commodore 8-bit computers to communicate with peripherals. Uses three active signal lines (ATN, Clock, Data) over a 6-pin DIN connector.
