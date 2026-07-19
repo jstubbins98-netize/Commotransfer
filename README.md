@@ -789,6 +789,7 @@ The most common Commodore floppy disk drive. Single-sided, double-density, 5¼" 
 
 **1571**
 An enhanced Commodore floppy drive capable of reading both sides of a disk (double-sided), with roughly double the capacity of a 1541. Fully compatible with Commotransfer.
+
 ---
 
 ## Licence
